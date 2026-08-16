@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db, auth, storage } from './firebase.js';
 import {
   collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, orderBy,
@@ -7,17 +7,21 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebas
 import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 
 // --- Design tokens, ported verbatim from the marketplace platform this
-// product was split off from (same DASH dashboard palette + STYLES sheet). ---
+// product was split off from (same DASH dashboard palette + STYLES sheet),
+// extended with the dark-sidebar / gradient visual language from the
+// reference host dashboard. ---
 const DASH = {
   ink: '#1A1A1A',
   sub: '#8A8578',
-  grad: 'linear-gradient(135deg, #FB923C, #EC4899)',
-  gradStart: '#FB923C',
-  gradEnd: '#EC4899',
+  grad: 'linear-gradient(135deg, #F0883E, #E8408C)',
+  gradStart: '#F0883E',
+  gradEnd: '#E8408C',
   purple: '#7C3AED',
   purpleBg: '#F3ECFE',
   teal: '#0D9488',
   tealBg: '#E6F7F4',
+  cream: '#FAF9F5',
+  dark: '#1A1A1A',
   cardShadow: '0 4px 20px -8px rgba(0,0,0,0.08)',
 };
 
@@ -27,7 +31,7 @@ const STYLES = `
   --sub: #8A8578;
   --gray: #6B6B6B;
   --border: #E4E4E4;
-  --bg: #FDFCFB;
+  --bg: #FAF9F5;
   --purple: #7C3AED;
   --purple-bg: #F3ECFE;
   --teal: #0D9488;
@@ -44,9 +48,10 @@ const STYLES = `
 .pw-btn:hover { opacity: 0.9; }
 .pw-btn:disabled { opacity: 0.5; cursor: default; }
 .pw-btn-grad {
-  background: linear-gradient(135deg, #FB923C, #EC4899); color: #fff; border: none; border-radius: 10px;
+  background: ${DASH.grad}; color: #fff; border: none; border-radius: 10px;
   padding: 0.75rem 1.25rem; font-weight: 700; cursor: pointer; font-family: inherit;
 }
+.pw-btn-grad:disabled { opacity: 0.6; cursor: default; }
 .pw-btn-outline {
   background: transparent; color: var(--ink); border: 1px solid var(--border);
   border-radius: 10px; padding: 0.75rem 1.25rem; font-weight: 600; cursor: pointer; font-family: inherit;
@@ -55,6 +60,7 @@ const STYLES = `
 .pw-input {
   border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.75rem;
   font-size: 0.95rem; width: 100%; font-family: inherit; background: #fff; color: var(--ink);
+  box-sizing: border-box;
 }
 .pw-input:focus { outline: 2px solid var(--purple); outline-offset: 1px; }
 .pw-card { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: #fff; box-shadow: ${DASH.cardShadow}; }
@@ -73,7 +79,76 @@ const STYLES = `
 }
 @keyframes pwSpin { to { transform: rotate(360deg); } }
 .pw-spin { animation: pwSpin 0.8s linear infinite; }
+
+/* --- dark sidebar dashboard shell --- */
+.pw-dash-shell { display: flex; min-height: 100vh; background: var(--bg); }
+.pw-sidebar {
+  width: 250px; flex-shrink: 0; background: ${DASH.dark}; padding: 1.5rem 1rem;
+  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  box-sizing: border-box;
+}
+.pw-side-label {
+  color: #6B6B6B; text-transform: uppercase; font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.06em; padding: 0 0.7rem; margin: 1.1rem 0 0.4rem;
+}
+.pw-side-link {
+  display: flex; align-items: center; gap: 10px; color: #C4C0B8; background: none; border: none;
+  text-align: left; padding: 0.6rem 0.7rem; border-radius: 999px; font-weight: 600; font-size: 0.87rem;
+  cursor: pointer; text-decoration: none; width: 100%; box-sizing: border-box; margin-bottom: 2px;
+  font-family: inherit;
+}
+.pw-side-link:hover:not(.active) { background: rgba(255,255,255,0.07); color: #fff; }
+.pw-side-link.active { background: ${DASH.grad}; color: #fff; }
+.pw-side-icon { width: 18px; text-align: center; font-size: 0.95rem; flex-shrink: 0; }
+.pw-dash-main { flex: 1; padding: 2rem; min-width: 0; }
+
+/* --- storefront hero / search / filters --- */
+.pw-hero {
+  background: ${DASH.dark}; border-radius: 22px; padding: 2.5rem 2rem; position: relative;
+  overflow: hidden; color: #fff;
+}
+.pw-hero-blob {
+  position: absolute; top: -60px; right: -60px; width: 260px; height: 260px; border-radius: 50%;
+  background: ${DASH.grad}; opacity: 0.35; filter: blur(10px);
+}
+.pw-search-bar {
+  display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 999px;
+  padding: 0.4rem 0.4rem 0.4rem 1.25rem; box-shadow: ${DASH.cardShadow}; max-width: 560px;
+}
+.pw-search-bar input { border: none; outline: none; flex: 1; font-family: inherit; font-size: 0.95rem; background: transparent; }
+.pw-search-btn {
+  width: 42px; height: 42px; border-radius: 50%; background: ${DASH.dark}; color: #fff;
+  border: none; cursor: pointer; font-size: 1rem; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+}
+.pw-pill {
+  border-radius: 999px; padding: 0.5rem 1rem; font-size: 0.84rem; font-weight: 600; border: none;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-family: inherit;
+  flex-shrink: 0;
+}
+.pw-pill.active { background: ${DASH.grad}; color: #fff; }
+.pw-promo {
+  background: ${DASH.dark}; border-radius: 18px; padding: 1.5rem 1.75rem; color: #fff;
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.pw-heart {
+  position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(255,255,255,0.9); border: none; cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 1rem;
+}
 `;
+
+// --- Category filter pills (visual language ported from the reference
+// host site; drives a real Firestore `category` field on each listing). ---
+const CATEGORIES = [
+  { key: 'villas', label: 'Villas', icon: '🏝️', bg: '#E1F5F2', color: '#0D6B63' },
+  { key: 'cottages', label: 'Cottages', icon: '🌿', bg: '#EAF6E8', color: '#3E7A38' },
+  { key: 'cabins', label: 'Cabins', icon: '🪵', bg: '#F5EFE2', color: '#8A6A2A' },
+  { key: 'heritage', label: 'Heritage', icon: '🏛️', bg: '#FBEAF2', color: '#B23A6E' },
+  { key: 'apartments', label: 'Apartments', icon: '🏢', bg: '#E7F0FB', color: '#2E5FA3' },
+  { key: 'houses', label: 'Houses', icon: '🏠', bg: '#FBEEE0', color: '#B2621E' },
+  { key: 'studios', label: 'Studios', icon: '🎨', bg: '#F1E9FB', color: '#6B3FA0' },
+];
+function categoryMeta(key) { return CATEGORIES.find(c => c.key === key); }
 
 // --- Amenity categories (ported verbatim — same checklist a host sees when
 // editing a listing on the marketplace platform, minus nothing) ---
@@ -136,6 +211,17 @@ function formatINR(n) {
 function monthLabel(y, m) {
   return new Date(y, m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diffMs / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return '1d ago';
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
 
 // --- Site settings (single doc: settings/site) ---
 const DEFAULT_SITE = {
@@ -144,6 +230,9 @@ const DEFAULT_SITE = {
   bannerSubtitle: 'Reach out directly and book your stay',
   whatsappNumber: '',
   whatsappMessage: 'Hi! I have a question about a stay.',
+  coverPhotoUrl: '',
+  coverPhotoPath: '',
+  payoutLog: [],
 };
 async function loadSiteSettings() {
   try {
@@ -154,6 +243,16 @@ async function loadSiteSettings() {
 }
 async function saveSiteSettings(fields) {
   await setDoc(doc(db, 'settings', 'site'), fields, { merge: true });
+}
+async function uploadSiteCoverPhoto(dataUrl) {
+  // storage.rules only grants write access under `listings/{listingId}/{fileName}`
+  // and we were told not to touch storage.rules, so the site-wide cover photo
+  // is stored under a reserved pseudo-listing id that matches that existing
+  // pattern rather than a new top-level path that would be silently denied.
+  const path = `listings/_site-cover/${Date.now()}.jpg`;
+  const storageRef = ref(storage, path);
+  await uploadString(storageRef, dataUrl, 'data_url');
+  return { path, url: await getDownloadURL(storageRef) };
 }
 
 // --- Listings ---
@@ -223,11 +322,12 @@ async function loadBookings() {
   } catch (e) { console.error('Failed to load bookings', e); return []; }
 }
 async function submitBookingRequest(fields) {
-  await addDoc(collection(db, 'bookings'), {
+  const ref2 = await addDoc(collection(db, 'bookings'), {
     ...fields,
     status: 'pending',
     submittedAt: new Date().toISOString(),
   });
+  return ref2.id;
 }
 async function updateBookingStatus(id, status, listing) {
   await updateDoc(doc(db, 'bookings', id), { status });
@@ -241,6 +341,18 @@ async function updateBookingStatus(id, status, listing) {
     await updateDoc(doc(db, 'listings', listing.id), { blockedDates: blocked });
   }
 }
+// Guests aren't authenticated in this single-tenant site, so "My trips" is a
+// simple honest lookup by confirmation code (the booking's document id) +
+// the email used at booking time, rather than a fake account system.
+async function lookupBookingByCode(code, email) {
+  try {
+    const snap = await getDoc(doc(db, 'bookings', code.trim()));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    if ((data.email || '').trim().toLowerCase() !== email.trim().toLowerCase()) return null;
+    return { id: snap.id, ...data };
+  } catch (e) { return null; }
+}
 
 // --- Messages (single-tenant guest inquiry thread, stored per listing) ---
 async function loadMessages(listingId) {
@@ -251,6 +363,17 @@ async function loadMessages(listingId) {
 }
 async function sendMessage(listingId, fields) {
   await addDoc(collection(db, 'listings', listingId, 'messages'), { ...fields, createdAt: new Date().toISOString() });
+}
+
+// --- Favorites: local-only "save" toggle. No backend for guests since they
+// aren't authenticated, so this is honestly a per-browser preference, not a
+// synced account feature. ---
+const FAVORITES_KEY = 'pw_favorites';
+function loadFavorites() {
+  try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'); } catch (e) { return []; }
+}
+function saveFavorites(list) {
+  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(list)); } catch (e) { /* ignore */ }
 }
 
 // ============================= UI ============================= //
@@ -264,22 +387,83 @@ function LoadingScreen() {
   );
 }
 
-function Nav({ site, onDashboardClick }) {
+function MyTripsModal({ onClose }) {
+  const [code, setCode] = useState('');
+  const [email, setEmail] = useState('');
+  const [status, setStatus] = useState('idle'); // idle | loading | found | notfound
+  const [booking, setBooking] = useState(null);
+
+  async function handleLookup(e) {
+    e.preventDefault();
+    setStatus('loading');
+    const b = await lookupBookingByCode(code, email);
+    if (b) { setBooking(b); setStatus('found'); } else { setStatus('notfound'); }
+  }
+
   return (
-    <div style={{ borderBottom: '1px solid var(--border)', padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <a href="/" style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--ink)', textDecoration: 'none' }}>{site.hostName}</a>
-      <button className="pw-btn-outline" onClick={onDashboardClick} style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}>Host sign in</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={onClose}>
+      <div className="pw-card" style={{ padding: '1.5rem', width: 380, maxWidth: '100%' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <p style={{ fontWeight: 800, fontSize: '1.05rem' }}>My trips</p>
+          <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: '1.3rem', cursor: 'pointer', color: 'var(--sub)' }}>×</button>
+        </div>
+        <p style={{ fontSize: '0.82rem', color: 'var(--sub)', marginBottom: 14 }}>
+          We don't have guest accounts yet — look up your booking with the confirmation code from your request email, plus the email address you booked with.
+        </p>
+        {status === 'found' && booking ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <p style={{ fontWeight: 700 }}>{booking.listingTitle}</p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--sub)' }}>{formatDateDisplay(booking.checkIn)} → {formatDateDisplay(booking.checkOut)} · {booking.guests} guests</p>
+            <p style={{ fontSize: '0.85rem' }}>Status: <strong>{booking.status}</strong></p>
+            <p style={{ fontSize: '0.85rem' }}>Total: <strong>{formatINR(booking.total)}</strong></p>
+            <button className="pw-btn-outline" style={{ marginTop: 8 }} onClick={() => { setStatus('idle'); setBooking(null); }}>Look up another</button>
+          </div>
+        ) : (
+          <form onSubmit={handleLookup} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input className="pw-input" placeholder="Confirmation code" value={code} onChange={e => setCode(e.target.value)} required />
+            <input className="pw-input" type="email" placeholder="Email used to book" value={email} onChange={e => setEmail(e.target.value)} required />
+            {status === 'notfound' && <p style={{ color: '#C0392B', fontSize: '0.82rem' }}>No matching booking found. Double-check the code and email.</p>}
+            <button className="pw-btn-grad" type="submit" disabled={status === 'loading'}>{status === 'loading' ? 'Looking up…' : 'Find my trip'}</button>
+          </form>
+        )}
+      </div>
     </div>
   );
 }
 
-function ListingCard({ listing, onClick }) {
+function Nav({ site, onDashboardClick }) {
+  const [showTrips, setShowTrips] = useState(false);
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)', padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {showTrips && <MyTripsModal onClose={() => setShowTrips(false)} />}
+      <a href="/" style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--ink)', textDecoration: 'none' }}>{site.hostName}</a>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="pw-btn-outline" onClick={() => setShowTrips(true)} style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}>My trips</button>
+        <button className="pw-btn-outline" onClick={onDashboardClick} style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}>Host sign in</button>
+      </div>
+    </div>
+  );
+}
+
+function ListingCard({ listing, onClick, favorite, onToggleFavorite }) {
   const cover = listing.images && listing.images[0];
+  const cat = categoryMeta(listing.category);
   return (
     <div className="pw-card" style={{ cursor: 'pointer' }} onClick={onClick}>
-      <div style={{ aspectRatio: '4/3', background: '#F2F0EC', backgroundImage: cover ? `url(${cover.url})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center' }} />
+      <div style={{ position: 'relative' }}>
+        <div style={{ aspectRatio: '4/3', background: '#F2F0EC', backgroundImage: cover ? `url(${cover.url})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center' }} />
+        <button
+          className="pw-heart"
+          onClick={(e) => { e.stopPropagation(); onToggleFavorite(listing.id); }}
+          title={favorite ? 'Remove from saved' : 'Save'}
+          style={{ color: favorite ? '#E8408C' : '#1A1A1A' }}
+        >{favorite ? '♥' : '♡'}</button>
+      </div>
       <div style={{ padding: '0.85rem 1rem' }}>
-        <p style={{ fontWeight: 700, marginBottom: 2 }}>{listing.title}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <p style={{ fontWeight: 700, marginBottom: 2 }}>{listing.title}</p>
+          {cat && <span style={{ fontSize: '0.68rem', fontWeight: 700, borderRadius: 999, padding: '0.15rem 0.5rem', background: cat.bg, color: cat.color, whiteSpace: 'nowrap' }}>{cat.icon} {cat.label}</span>}
+        </div>
         <p style={{ color: 'var(--sub)', fontSize: '0.85rem', marginBottom: 6 }}>{listing.city}</p>
         <p style={{ fontWeight: 700 }}>{formatINR(listing.price)} <span style={{ color: 'var(--sub)', fontWeight: 400, fontSize: '0.85rem' }}>/ night</span></p>
       </div>
@@ -288,22 +472,93 @@ function ListingCard({ listing, onClick }) {
 }
 
 function HomeView({ site, listings, onOpenListing, onDashboardClick }) {
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all');
+  const [favorites, setFavorites] = useState(loadFavorites());
+
+  function toggleFavorite(id) {
+    setFavorites(f => {
+      const next = f.includes(id) ? f.filter(x => x !== id) : [...f, id];
+      saveFavorites(next);
+      return next;
+    });
+  }
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return listings.filter(l => {
+      if (category !== 'all' && l.category !== category) return false;
+      if (!term) return true;
+      const hay = `${l.title || ''} ${l.city || ''}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [listings, search, category]);
+
+  const presentCategories = useMemo(() => {
+    const set = new Set(listings.map(l => l.category).filter(Boolean));
+    return CATEGORIES.filter(c => set.has(c.key));
+  }, [listings]);
+
   return (
     <div className="pw-root">
       <style>{STYLES}</style>
       <Nav site={site} onDashboardClick={onDashboardClick} />
-      <div style={{ padding: '3rem 1.5rem 1.5rem', maxWidth: 640 }}>
-        <h1 style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: '0.75rem', letterSpacing: '-0.02em' }}>{site.bannerTitle}</h1>
-        <p style={{ color: 'var(--sub)', fontSize: '1.05rem' }}>{site.bannerSubtitle}</p>
+      <div style={{ padding: '2rem 1.5rem 0', maxWidth: 1100, margin: '0 auto' }}>
+        <div className="pw-hero">
+          <div className="pw-hero-blob" />
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
+            <div style={{ width: 52, height: 52, borderRadius: '50%', background: DASH.grad, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.3rem', flexShrink: 0 }}>
+              {(site.hostName || 'H').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h1 style={{ fontSize: '1.9rem', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>{site.bannerTitle || `${site.hostName}'s stays`}</h1>
+              <p style={{ color: '#D8D5CE', fontSize: '0.98rem', margin: '4px 0 0' }}>
+                {site.bannerSubtitle || `${listings.length} handpicked stay${listings.length === 1 ? '' : 's'}`}
+              </p>
+            </div>
+          </div>
+          <div className="pw-search-bar" style={{ position: 'relative' }}>
+            <span style={{ color: 'var(--sub)' }}>🔍</span>
+            <input placeholder="Search destinations" value={search} onChange={e => setSearch(e.target.value)} />
+            <button className="pw-search-btn">🔍</button>
+          </div>
+        </div>
       </div>
+
+      <div style={{ padding: '1.5rem 1.5rem 0', maxWidth: 1100, margin: '0 auto', display: 'flex', gap: 8, overflowX: 'auto' }}>
+        <button className="pw-pill" style={{ background: '#fff', border: '1px solid var(--border)' }}>Filters ⚙</button>
+        <button className={'pw-pill' + (category === 'all' ? ' active' : '')} style={category === 'all' ? {} : { background: '#F2F0EC', color: 'var(--ink)' }} onClick={() => setCategory('all')}>All</button>
+        {presentCategories.map(c => (
+          <button
+            key={c.key}
+            className={'pw-pill' + (category === c.key ? ' active' : '')}
+            style={category === c.key ? {} : { background: c.bg, color: c.color }}
+            onClick={() => setCategory(category === c.key ? 'all' : c.key)}
+          >{c.icon} {c.label}</button>
+        ))}
+      </div>
+
+      <div style={{ padding: '1.5rem', maxWidth: 1100, margin: '0 auto' }}>
+        <div className="pw-promo">
+          <div>
+            <p style={{ fontWeight: 800, fontSize: '1.1rem', margin: 0 }}>Book direct, save the fees</p>
+            <p style={{ color: '#D8D5CE', fontSize: '0.9rem', margin: '4px 0 0' }}>Skip the commission markups other booking sites add to your price</p>
+          </div>
+          <div style={{ width: 46, height: 46, borderRadius: '50%', background: DASH.grad, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>🏷️</div>
+        </div>
+      </div>
+
       <div style={{ padding: '0 1.5rem 3rem', maxWidth: 1100, margin: '0 auto' }}>
-        {listings.length === 0 ? (
+        <p style={{ fontWeight: 700, marginBottom: 12 }}>{filtered.length} stay{filtered.length === 1 ? '' : 's'}</p>
+        {filtered.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', border: '1px solid var(--border)', borderRadius: 14, color: 'var(--sub)' }}>
-            No stays are live yet. Check back soon.
+            {listings.length === 0 ? 'No stays are live yet. Check back soon.' : 'No stays match your search.'}
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '1.25rem' }}>
-            {listings.map(l => <ListingCard key={l.id} listing={l} onClick={() => onOpenListing(l)} />)}
+            {filtered.map(l => (
+              <ListingCard key={l.id} listing={l} onClick={() => onOpenListing(l)} favorite={favorites.includes(l.id)} onToggleFavorite={toggleFavorite} />
+            ))}
           </div>
         )}
       </div>
@@ -390,6 +645,7 @@ function DetailView({ listing, site, onBack }) {
   const [status, setStatus] = useState('idle'); // idle | submitting | done | error
   const [error, setError] = useState('');
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [confirmationCode, setConfirmationCode] = useState('');
 
   const nights = calculateNights(checkIn, checkOut);
   const total = calculateTotalPrice(listing, checkIn, checkOut);
@@ -404,12 +660,13 @@ function DetailView({ listing, site, onBack }) {
     if (!name || !email || !phone) { setError('Name, email, and phone are required.'); return; }
     setStatus('submitting');
     try {
-      await submitBookingRequest({
+      const id = await submitBookingRequest({
         listingId: listing.id,
         listingTitle: listing.title,
         checkIn, checkOut, nights, guests: Number(guests), total,
         name, email, phone,
       });
+      setConfirmationCode(id);
       setStatus('done');
     } catch (e2) {
       console.error(e2);
@@ -462,6 +719,10 @@ function DetailView({ listing, site, onBack }) {
             <div style={{ padding: '1rem', background: 'var(--teal-bg)', border: '1px solid #B9E4DC', borderRadius: 10 }}>
               <p style={{ fontWeight: 700, marginBottom: 4, color: 'var(--teal)' }}>Request sent</p>
               <p style={{ fontSize: '0.9rem', color: 'var(--gray)' }}>{site.hostName} will reach out to confirm your dates.</p>
+              <p style={{ fontSize: '0.82rem', color: 'var(--gray)', marginTop: 8 }}>
+                Confirmation code: <strong>{confirmationCode}</strong><br />
+                Save this — use it with your email under "My trips" to check your status any time.
+              </p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -577,18 +838,23 @@ function ManualBlockCard({ listing, onRefresh }) {
 }
 
 function BookingRequestCard({ b, listings, onAct }) {
+  const listing = listings.find(l => l.id === b.listingId);
+  const cover = listing && listing.images && listing.images[0];
   return (
-    <div className="pw-card" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-      <div>
-        <p style={{ fontWeight: 700 }}>{b.listingTitle}</p>
-        <p style={{ fontSize: '0.85rem', color: 'var(--sub)' }}>{formatDateDisplay(b.checkIn)} → {formatDateDisplay(b.checkOut)} · {b.guests} guests · {formatINR(b.total)}</p>
-        <p style={{ fontSize: '0.85rem', color: 'var(--sub)' }}>{b.name} · {b.email} · {b.phone}</p>
+    <div className="pw-card" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flex: 1, minWidth: 220 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 10, flexShrink: 0, background: '#F2F0EC', backgroundImage: cover ? `url(${cover.url})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center' }} />
+        <div>
+          <p style={{ fontWeight: 700 }}>{b.listingTitle}</p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--sub)' }}>{formatDateDisplay(b.checkIn)} → {formatDateDisplay(b.checkOut)} · {b.guests} guests · {formatINR(b.total)}</p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--sub)' }}>{b.name} · {b.email} · {b.phone}</p>
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <span style={{
           fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', borderRadius: 999, padding: '0.25rem 0.6rem',
-          color: b.status === 'confirmed' ? DASH.teal : b.status === 'cancelled' ? '#C0392B' : '#9C6B0B',
-          background: b.status === 'confirmed' ? DASH.tealBg : b.status === 'cancelled' ? '#FBEAEA' : '#FBF3E0',
+          color: b.status === 'confirmed' ? DASH.teal : (b.status === 'cancelled' || b.status === 'declined') ? '#C0392B' : '#9C6B0B',
+          background: b.status === 'confirmed' ? DASH.tealBg : (b.status === 'cancelled' || b.status === 'declined') ? '#FBEAEA' : '#FBF3E0',
         }}>{b.status}</span>
         {b.status === 'pending' && (
           <>
@@ -596,21 +862,42 @@ function BookingRequestCard({ b, listings, onAct }) {
             <button className="pw-btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => onAct(b, 'cancelled')}>Decline</button>
           </>
         )}
+        {b.status === 'confirmed' && (
+          <button className="pw-btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => onAct(b, 'cancelled')}>Cancel</button>
+        )}
       </div>
     </div>
   );
 }
 
 function BookingsSection({ bookings, listings, onRefresh }) {
+  const [filter, setFilter] = useState('all');
   async function act(b, status) {
     const listing = listings.find(l => l.id === b.listingId);
     await updateBookingStatus(b.id, status, listing);
     onRefresh();
   }
-  if (bookings.length === 0) return <p style={{ color: 'var(--sub)' }}>No booking requests yet.</p>;
+  const filters = [
+    { key: 'all', label: 'All' },
+    { key: 'pending', label: 'Pending' },
+    { key: 'confirmed', label: 'Confirmed' },
+    { key: 'cancelled', label: 'Cancelled' },
+  ];
+  const filtered = filter === 'all' ? bookings : bookings.filter(b => b.status === filter);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {bookings.map(b => <BookingRequestCard key={b.id} b={b} listings={listings} onAct={act} />)}
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {filters.map(f => (
+          <button key={f.key} className={'pw-pill' + (filter === f.key ? ' active' : '')} style={filter === f.key ? {} : { background: '#F2F0EC', color: 'var(--ink)' }} onClick={() => setFilter(f.key)}>{f.label}</button>
+        ))}
+      </div>
+      {filtered.length === 0 ? (
+        <p style={{ color: 'var(--sub)' }}>No booking requests here.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filtered.map(b => <BookingRequestCard key={b.id} b={b} listings={listings} onAct={act} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -654,7 +941,7 @@ function SeasonalRateForm({ draft, set }) {
 }
 
 function ListingEditCard({ listing, onSaved, onCancel }) {
-  const [draft, setDraft] = useState(listing || { title: '', city: '', price: '', weekendPrice: '', beds: 1, guests: 2, description: '', amenities: [], images: [], blockedDates: [], seasonalRates: [] });
+  const [draft, setDraft] = useState(listing || { title: '', city: '', category: '', price: '', weekendPrice: '', beds: 1, guests: 2, description: '', amenities: [], images: [], blockedDates: [], seasonalRates: [] });
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
 
@@ -684,7 +971,7 @@ function ListingEditCard({ listing, onSaved, onCancel }) {
     setBusy(true);
     try {
       const fields = {
-        title: draft.title, city: draft.city, price: Number(draft.price) || 0,
+        title: draft.title, city: draft.city, category: draft.category || '', price: Number(draft.price) || 0,
         weekendPrice: Number(draft.weekendPrice) || 0, beds: Number(draft.beds) || 1,
         guests: Number(draft.guests) || 1, description: draft.description || '',
         amenities: draft.amenities || [], images: draft.images || [],
@@ -696,17 +983,21 @@ function ListingEditCard({ listing, onSaved, onCancel }) {
   }
 
   return (
-    <div className="pw-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <input className="pw-input" placeholder="Title" value={draft.title} onChange={e => set('title', e.target.value)} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         <input className="pw-input" placeholder="City" value={draft.city} onChange={e => set('city', e.target.value)} />
-        <input className="pw-input" type="number" placeholder="Price / night (INR)" value={draft.price} onChange={e => set('price', e.target.value)} />
+        <select className="pw-input" value={draft.category || ''} onChange={e => set('category', e.target.value)}>
+          <option value="">Category (none)</option>
+          {CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.icon} {c.label}</option>)}
+        </select>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <input className="pw-input" type="number" placeholder="Price / night (INR)" value={draft.price} onChange={e => set('price', e.target.value)} />
         <input className="pw-input" type="number" placeholder="Weekend price" value={draft.weekendPrice} onChange={e => set('weekendPrice', e.target.value)} />
         <input className="pw-input" type="number" placeholder="Beds" value={draft.beds} onChange={e => set('beds', e.target.value)} />
-        <input className="pw-input" type="number" placeholder="Max guests" value={draft.guests} onChange={e => set('guests', e.target.value)} />
       </div>
+      <input className="pw-input" type="number" placeholder="Max guests" value={draft.guests} onChange={e => set('guests', e.target.value)} style={{ maxWidth: 200 }} />
       <textarea className="pw-input" placeholder="Description" rows={3} value={draft.description} onChange={e => set('description', e.target.value)} />
 
       <SeasonalRateForm draft={draft} set={set} />
@@ -760,65 +1051,81 @@ function ListingEditCard({ listing, onSaved, onCancel }) {
   );
 }
 
-function ListingsSection({ listings, onRefresh }) {
-  const [editing, setEditing] = useState(null); // null | 'new' | listing object
-
-  if (editing) {
-    return (
-      <ListingEditCard
-        listing={editing === 'new' ? null : editing}
-        onSaved={() => { setEditing(null); onRefresh(); }}
-        onCancel={() => setEditing(null)}
-      />
-    );
-  }
-
+function ListingRow({ listing, expanded, onToggle, onSaved }) {
+  const cover = listing.images && listing.images[0];
   return (
-    <div>
-      <button className="pw-btn-grad" style={{ marginBottom: 14 }} onClick={() => setEditing('new')}>+ Add listing</button>
-      {listings.length === 0 ? (
-        <p style={{ color: 'var(--sub)' }}>No listings yet — add your first one.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {listings.map(l => (
-            <div key={l.id} className="pw-card" style={{ padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <p style={{ fontWeight: 700 }}>{l.title || 'Untitled'}</p>
-                <p style={{ fontSize: '0.85rem', color: 'var(--sub)' }}>{l.city} · {formatINR(l.price)}/night</p>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="pw-btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={() => setEditing(l)}>Edit</button>
-                <button className="pw-btn-outline" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} onClick={async () => { if (confirm('Delete this listing?')) { await deleteListing(l.id); onRefresh(); } }}>Delete</button>
-              </div>
-            </div>
-          ))}
+    <div className="pw-card">
+      <div onClick={onToggle} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, padding: '0.9rem 1rem' }}>
+        <div style={{ width: 56, height: 56, borderRadius: 10, background: '#F2F0EC', backgroundImage: cover ? `url(${cover.url})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontWeight: 700 }}>{listing.title || 'Untitled'}</p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--sub)' }}>{listing.city} · {formatINR(listing.price)}/night · {(listing.images || []).length} photo{(listing.images || []).length === 1 ? '' : 's'}</p>
+        </div>
+        <span className="pw-chip" style={{ background: 'var(--teal-bg)', color: 'var(--teal)', borderColor: 'transparent', flexShrink: 0 }}>Live</span>
+        <span style={{ fontSize: '1.2rem', color: 'var(--sub)', display: 'inline-block', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }}>›</span>
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 1rem 1.25rem', borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <ListingEditCard listing={listing} onSaved={onSaved} onCancel={onToggle} />
         </div>
       )}
     </div>
   );
 }
 
-function CalendarSyncCard({ site, onSaved }) {
-  const [icsUrl, setIcsUrl] = useState(site.calendarSyncUrl || '');
+function ListingsSection({ listings, onRefresh }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const [addingNew, setAddingNew] = useState(false);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {listings.length === 0 && !addingNew && (
+        <p style={{ color: 'var(--sub)' }}>No listings yet — add your first one below.</p>
+      )}
+      {listings.map(l => (
+        <ListingRow
+          key={l.id}
+          listing={l}
+          expanded={expandedId === l.id}
+          onToggle={() => setExpandedId(id => (id === l.id ? null : l.id))}
+          onSaved={() => { setExpandedId(null); onRefresh(); }}
+        />
+      ))}
+      {addingNew ? (
+        <div className="pw-card" style={{ padding: '1.25rem' }}>
+          <ListingEditCard listing={null} onSaved={() => { setAddingNew(false); onRefresh(); }} onCancel={() => setAddingNew(false)} />
+        </div>
+      ) : (
+        <button
+          onClick={() => setAddingNew(true)}
+          style={{ border: '2px dashed var(--border)', borderRadius: 14, padding: '1.1rem', background: 'none', cursor: 'pointer', color: 'var(--sub)', fontWeight: 700, fontFamily: 'inherit' }}
+        >+ Add a listing</button>
+      )}
+    </div>
+  );
+}
+
+function CalendarSyncCard({ listing, onRefresh }) {
+  const [icsUrl, setIcsUrl] = useState(listing.icalUrl || '');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
   async function handleSave() {
     setBusy(true);
     try {
-      await saveSiteSettings({ calendarSyncUrl: icsUrl });
-      onSaved({ ...site, calendarSyncUrl: icsUrl });
+      await updateDoc(doc(db, 'listings', listing.id), { icalUrl: icsUrl });
+      onRefresh();
       setSaved(true);
     } finally { setBusy(false); }
   }
 
   return (
-    <div className="pw-card" style={{ padding: '1.25rem', maxWidth: 520 }}>
-      <p style={{ fontWeight: 700, marginBottom: 4 }}>Calendar sync</p>
-      <p style={{ fontSize: '0.85rem', color: 'var(--sub)', marginBottom: 10 }}>
-        Paste your Airbnb / Booking.com iCal export URL here. Once a sync job is connected, dates blocked on
-        that platform will automatically block here too, so you never get double-booked. (The sync job itself
-        is a follow-up step — this saves the URL now so it's ready to wire up.)
+    <div className="pw-card" style={{ padding: '1rem' }}>
+      <p style={{ fontWeight: 700, marginBottom: 4 }}>{listing.title || 'Untitled'}</p>
+      <p style={{ fontSize: '0.82rem', color: 'var(--sub)', marginBottom: 10 }}>
+        Paste this listing's calendar export link (Airbnb, Booking.com, etc.) — a listing can have more than
+        one connected once real syncing is wired up. For now this just saves the link here; automatically
+        blocking dates from it is a follow-up step.
       </p>
       <div style={{ display: 'flex', gap: 8 }}>
         <input className="pw-input" placeholder="https://www.airbnb.com/calendar/ical/..." value={icsUrl} onChange={e => { setIcsUrl(e.target.value); setSaved(false); }} />
@@ -829,30 +1136,214 @@ function CalendarSyncCard({ site, onSaved }) {
   );
 }
 
-function WalletSection({ bookings }) {
+function CalendarSection({ listings, onRefresh }) {
+  if (listings.length === 0) return <p style={{ color: 'var(--sub)' }}>Add a listing first — its calendar tools show up here.</p>;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <p style={{ color: 'var(--sub)', fontSize: '0.9rem', maxWidth: 640 }}>
+        Connect each listing's calendar export link so its booked dates can eventually sync automatically —
+        no sync job runs yet, this just saves the link — and block dates by hand any time in the meantime.
+      </p>
+      {listings.map(l => (
+        <div key={l.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <CalendarSyncCard listing={l} onRefresh={onRefresh} />
+          <ManualBlockCard listing={l} onRefresh={onRefresh} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatTile({ label, value, icon, grad }) {
+  return (
+    <div className="pw-card" style={{ padding: '1.1rem', display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 160, ...(grad ? { background: DASH.grad, border: 'none' } : {}) }}>
+      <div style={{ width: 40, height: 40, borderRadius: '50%', background: grad ? 'rgba(255,255,255,0.22)' : 'var(--purple-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem', flexShrink: 0 }}>{icon}</div>
+      <div>
+        <p style={{ fontSize: '0.78rem', color: grad ? 'rgba(255,255,255,0.9)' : 'var(--sub)', marginBottom: 2 }}>{label}</p>
+        <p style={{ fontWeight: 800, fontSize: '1.3rem', color: grad ? '#fff' : 'var(--ink)' }}>{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function BarChart({ data }) {
+  const max = Math.max(1, ...data.map(d => d.value));
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 140, padding: '0 4px' }}>
+      {data.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--sub)' }}>{formatINR(d.value)}</span>
+          <div style={{ width: '100%', maxWidth: 30, borderRadius: '6px 6px 2px 2px', background: DASH.grad, height: `${Math.max(4, (d.value / max) * 100)}%` }} />
+          <span style={{ fontSize: '0.68rem', color: 'var(--sub)' }}>{d.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DonutChart({ segments, size = 130 }) {
+  const total = segments.reduce((s, x) => s + x.value, 0);
+  const radius = 42, circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+      <svg width={size} height={size} viewBox="0 0 100 100">
+        <g transform="rotate(-90 50 50)">
+          {total === 0 ? (
+            <circle cx="50" cy="50" r={radius} fill="none" stroke="#F2F0EC" strokeWidth="14" />
+          ) : segments.map((seg, i) => {
+            const frac = seg.value / total;
+            const dash = frac * circumference;
+            const circle = (
+              <circle key={i} cx="50" cy="50" r={radius} fill="none" stroke={seg.color} strokeWidth="14"
+                strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="butt" />
+            );
+            offset += dash;
+            return circle;
+          })}
+        </g>
+      </svg>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {segments.length === 0 && <span style={{ fontSize: '0.8rem', color: 'var(--sub)' }}>No data yet</span>}
+        {segments.map((s, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+            <span style={{ color: 'var(--sub)' }}>{s.label}</span>
+            <strong>{typeof s.display !== 'undefined' ? s.display : s.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReportsSection({ bookings, listings }) {
   const confirmed = bookings.filter(b => b.status === 'confirmed');
-  const totalEarnings = confirmed.reduce((sum, b) => sum + (Number(b.total) || 0), 0);
-  const pending = bookings.filter(b => b.status === 'pending');
-  const pendingValue = pending.reduce((sum, b) => sum + (Number(b.total) || 0), 0);
+  const totalRevenue = confirmed.reduce((s, b) => s + (Number(b.total) || 0), 0);
+  const totalNights = confirmed.reduce((s, b) => s + (Number(b.nights) || 0), 0);
+  const avgNightly = totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0;
+
+  const monthMap = {};
+  confirmed.forEach(b => {
+    const key = (b.checkIn || b.submittedAt || '').slice(0, 7);
+    if (!key) return;
+    monthMap[key] = (monthMap[key] || 0) + (Number(b.total) || 0);
+  });
+  const monthData = Object.keys(monthMap).sort().slice(-6).map(k => {
+    const [y, m] = k.split('-').map(Number);
+    return { label: new Date(y, (m || 1) - 1, 1).toLocaleDateString('en-US', { month: 'short' }), value: monthMap[k] };
+  });
+
+  const statusColors = { pending: '#F5A524', confirmed: DASH.teal, cancelled: '#C0392B', declined: '#C0392B' };
+  const statusCounts = {};
+  bookings.forEach(b => { statusCounts[b.status] = (statusCounts[b.status] || 0) + 1; });
+  const statusSegments = Object.entries(statusCounts).map(([k, v]) => ({ label: k, value: v, color: statusColors[k] || '#999' }));
+
+  const byListing = {};
+  confirmed.forEach(b => { byListing[b.listingTitle || 'Untitled'] = (byListing[b.listingTitle || 'Untitled'] || 0) + (Number(b.total) || 0); });
+  const listingColors = [DASH.gradStart, DASH.gradEnd, DASH.purple, DASH.teal, '#3B82F6', '#F59E0B'];
+  const listingSegments = Object.entries(byListing).map(([k, v], i) => ({ label: k, value: v, display: formatINR(v), color: listingColors[i % listingColors.length] }));
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, maxWidth: 640 }}>
-      <div className="pw-card" style={{ padding: '1.25rem' }}>
-        <p style={{ fontSize: '0.8rem', color: 'var(--sub)', marginBottom: 4 }}>Confirmed earnings</p>
-        <p style={{ fontSize: '1.6rem', fontWeight: 800 }}>{formatINR(totalEarnings)}</p>
-        <p style={{ fontSize: '0.78rem', color: 'var(--sub)' }}>{confirmed.length} confirmed booking{confirmed.length === 1 ? '' : 's'}</p>
+    <div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <StatTile label="Total revenue" value={formatINR(totalRevenue)} icon="₹" grad />
+        <StatTile label="Total bookings" value={bookings.length} icon="📩" />
+        <StatTile label="Avg. nightly rate" value={formatINR(avgNightly)} icon="🌙" />
+        <StatTile label="Live listings" value={listings.length} icon="🏠" />
+      </div>
+      {monthData.length > 0 && (
+        <div className="pw-card" style={{ padding: '1.25rem', marginBottom: 16 }}>
+          <p style={{ fontWeight: 700, marginBottom: 12, fontSize: '0.9rem' }}>Revenue by month</p>
+          <BarChart data={monthData} />
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+        <div className="pw-card" style={{ padding: '1.25rem' }}>
+          <p style={{ fontWeight: 700, marginBottom: 12, fontSize: '0.9rem' }}>Bookings by status</p>
+          <DonutChart segments={statusSegments} />
+        </div>
+        <div className="pw-card" style={{ padding: '1.25rem' }}>
+          <p style={{ fontWeight: 700, marginBottom: 12, fontSize: '0.9rem' }}>Revenue by listing</p>
+          <DonutChart segments={listingSegments} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OverviewSection({ bookings, listings, site }) {
+  const total = bookings.length;
+  const awaiting = bookings.filter(b => b.status === 'pending').length;
+  const confirmed = bookings.filter(b => b.status === 'confirmed').length;
+  return (
+    <div>
+      <h1 style={{ fontSize: '1.6rem', fontWeight: 800, marginBottom: 4 }}>Welcome back, {site.hostName}</h1>
+      <p style={{ color: 'var(--sub)', marginBottom: 20 }}>Here's how your stays are doing.</p>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
+        <StatTile label="Total requests" value={total} icon="📥" />
+        <StatTile label="Awaiting reply" value={awaiting} icon="⏳" />
+        <StatTile label="Confirmed" value={confirmed} icon="✅" />
+      </div>
+      <ReportsSection bookings={bookings} listings={listings} />
+    </div>
+  );
+}
+
+function WalletSection({ bookings, site, onSaved }) {
+  const confirmed = bookings.filter(b => b.status === 'confirmed');
+  const totalEarnings = confirmed.reduce((s, b) => s + (Number(b.total) || 0), 0);
+  const payoutLog = site.payoutLog || [];
+  const paidOut = payoutLog.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const available = Math.max(0, totalEarnings - paidOut);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function logPayout() {
+    if (!amount || Number(amount) <= 0) return;
+    setBusy(true);
+    try {
+      const entry = { amount: Number(amount), note: note || '', date: new Date().toISOString() };
+      const next = [entry, ...payoutLog];
+      await saveSiteSettings({ payoutLog: next });
+      onSaved({ ...site, payoutLog: next });
+      setAmount(''); setNote('');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 640 }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <StatTile label="Available balance" value={formatINR(available)} icon="₹" grad />
+        <StatTile label="Paid out so far" value={formatINR(paidOut)} icon="🏦" />
       </div>
       <div className="pw-card" style={{ padding: '1.25rem' }}>
-        <p style={{ fontSize: '0.8rem', color: 'var(--sub)', marginBottom: 4 }}>Pending value</p>
-        <p style={{ fontSize: '1.6rem', fontWeight: 800, color: '#9C6B0B' }}>{formatINR(pendingValue)}</p>
-        <p style={{ fontSize: '0.78rem', color: 'var(--sub)' }}>{pending.length} awaiting confirmation</p>
-      </div>
-      <div className="pw-card" style={{ padding: '1rem', gridColumn: '1 / -1', background: 'var(--purple-bg)', border: 'none' }}>
-        <p style={{ fontSize: '0.82rem', color: 'var(--purple)' }}>
-          This is a summary view — since bookings here are confirmed manually (no built-in payment
-          processing yet), collect payment directly from the guest and mark it here for your records.
-          Connecting a payment processor (e.g. Razorpay) is a separate follow-up.
+        <p style={{ fontWeight: 700, marginBottom: 4 }}>Request a payout</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--sub)', marginBottom: 12 }}>
+          No payment processor is connected yet, so guests pay you directly and this just logs it for your
+          records — a running history of what's been paid out, not an automatic transfer.
         </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input className="pw-input" type="number" placeholder="Amount (INR)" style={{ maxWidth: 160 }} value={amount} onChange={e => setAmount(e.target.value)} />
+          <input className="pw-input" placeholder="Note (optional)" style={{ flex: 1, minWidth: 160 }} value={note} onChange={e => setNote(e.target.value)} />
+          <button className="pw-btn-grad" onClick={logPayout} disabled={busy}>{busy ? 'Logging…' : 'Log payout'}</button>
+        </div>
+      </div>
+      <div>
+        <p style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>Request history</p>
+        {payoutLog.length === 0 ? (
+          <p style={{ color: 'var(--sub)', fontSize: '0.9rem' }}>No payouts logged yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {payoutLog.map((p, i) => (
+              <div key={i} className="pw-card" style={{ padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                <span>{p.note || 'Payout'} · {timeAgo(p.date)}</span>
+                <strong>{formatINR(p.amount)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -884,7 +1375,8 @@ function PayoutDetailsSection({ site, onSaved }) {
     <div className="pw-card" style={{ padding: '1.25rem', maxWidth: 480 }}>
       <p style={{ fontWeight: 700, marginBottom: 4 }}>Payout details</p>
       <p style={{ fontSize: '0.85rem', color: 'var(--sub)', marginBottom: 10 }}>
-        For your own reference — where guests should send payment until a payment processor is connected.
+        Where your payouts get sent — add this once so you don't have to send bank details separately each
+        time. This is just your own reference; no payout automation is wired up yet.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <input className="pw-input" placeholder="Account holder name" value={draft.accountName} onChange={e => setDraft({ ...draft, accountName: e.target.value })} />
@@ -899,73 +1391,54 @@ function PayoutDetailsSection({ site, onSaved }) {
 }
 
 function GuestsSection({ bookings }) {
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('recent');
   const guests = {};
   bookings.forEach(b => {
     const key = b.email;
-    if (!guests[key]) guests[key] = { name: b.name, email: b.email, phone: b.phone, trips: 0, spend: 0 };
+    if (!key) return;
+    if (!guests[key]) guests[key] = { name: b.name, email: b.email, phone: b.phone, trips: 0, spend: 0, last: b.submittedAt };
     guests[key].trips += 1;
     guests[key].spend += Number(b.total) || 0;
+    if (!guests[key].last || (b.submittedAt && b.submittedAt > guests[key].last)) guests[key].last = b.submittedAt;
   });
-  const list = Object.values(guests).sort((a, b) => b.spend - a.spend);
-  if (list.length === 0) return <p style={{ color: 'var(--sub)' }}>No guests yet.</p>;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {list.map(g => (
-        <div key={g.email} className="pw-card" style={{ padding: '0.85rem 1rem', display: 'flex', justifyContent: 'space-between' }}>
-          <div>
-            <p style={{ fontWeight: 700 }}>{g.name}</p>
-            <p style={{ fontSize: '0.82rem', color: 'var(--sub)' }}>{g.email} · {g.phone}</p>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ fontWeight: 700 }}>{formatINR(g.spend)}</p>
-            <p style={{ fontSize: '0.78rem', color: 'var(--sub)' }}>{g.trips} trip{g.trips === 1 ? '' : 's'}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ReportsSection({ bookings, listings }) {
-  const confirmed = bookings.filter(b => b.status === 'confirmed');
-  const totalRevenue = confirmed.reduce((s, b) => s + (Number(b.total) || 0), 0);
-  const totalNights = confirmed.reduce((s, b) => s + (Number(b.nights) || 0), 0);
-  const avgNightly = totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0;
-  const byListing = {};
-  confirmed.forEach(b => {
-    byListing[b.listingTitle] = (byListing[b.listingTitle] || 0) + (Number(b.total) || 0);
-  });
-  const topListings = Object.entries(byListing).sort((a, b) => b[1] - a[1]);
-
-  const stats = [
-    { label: 'Total revenue', value: formatINR(totalRevenue) },
-    { label: 'Confirmed bookings', value: confirmed.length },
-    { label: 'Nights booked', value: totalNights },
-    { label: 'Avg. nightly rate', value: formatINR(avgNightly) },
-    { label: 'Live listings', value: listings.length },
-  ];
+  let list = Object.values(guests);
+  if (search.trim()) {
+    const term = search.trim().toLowerCase();
+    list = list.filter(g => (g.name || '').toLowerCase().includes(term));
+  }
+  list = list.sort((a, b) => sort === 'recent' ? (b.last || '').localeCompare(a.last || '') : b.spend - a.spend);
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 20 }}>
-        {stats.map(s => (
-          <div key={s.label} className="pw-card" style={{ padding: '0.9rem' }}>
-            <p style={{ fontSize: '0.75rem', color: 'var(--sub)', marginBottom: 4 }}>{s.label}</p>
-            <p style={{ fontWeight: 800, fontSize: '1.15rem' }}>{s.value}</p>
-          </div>
-        ))}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <input className="pw-input" placeholder="Search by name" style={{ maxWidth: 260 }} value={search} onChange={e => setSearch(e.target.value)} />
+        <select className="pw-input" style={{ maxWidth: 180 }} value={sort} onChange={e => setSort(e.target.value)}>
+          <option value="recent">Most recent</option>
+          <option value="spend">Highest spend</option>
+        </select>
       </div>
-      {topListings.length > 0 && (
-        <div>
-          <p style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>Revenue by listing</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {topListings.map(([title, rev]) => (
-              <div key={title} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <span>{title}</span>
-                <strong>{formatINR(rev)}</strong>
+      {list.length === 0 ? (
+        <p style={{ color: 'var(--sub)' }}>No guests yet.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {list.map(g => (
+            <div key={g.email} className="pw-card" style={{ padding: '0.85rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: '50%', background: DASH.grad, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0 }}>
+                  {(g.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p style={{ fontWeight: 700 }}>{g.name}</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--sub)' }}>{g.phone} · {g.email}</p>
+                </div>
               </div>
-            ))}
-          </div>
+              <div style={{ textAlign: 'right' }}>
+                <p style={{ fontWeight: 700 }}>{formatINR(g.spend)}</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--sub)' }}>{g.trips} trip{g.trips === 1 ? '' : 's'} · {timeAgo(g.last)}</p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -1030,17 +1503,53 @@ function HostMessagesSection({ listings }) {
 function SettingsSection({ site, onSaved }) {
   const [draft, setDraft] = useState(site);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const coverFileRef = useRef(null);
+
   async function handleSave() {
     setBusy(true);
     try { await saveSiteSettings(draft); onSaved(draft); } finally { setBusy(false); }
   }
+
+  async function handleCoverPhoto(e) {
+    const file = (e.target.files || [])[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const dataUrl = await compressImageFile(file, 1800, 0.85);
+      const { path, url } = await uploadSiteCoverPhoto(dataUrl);
+      const next = { ...draft, coverPhotoUrl: url, coverPhotoPath: path };
+      setDraft(next);
+      await saveSiteSettings({ coverPhotoUrl: url, coverPhotoPath: path });
+      onSaved(next);
+    } finally {
+      setUploading(false);
+      if (coverFileRef.current) coverFileRef.current.value = '';
+    }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 520 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 560 }}>
       <div className="pw-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div>
-          <label style={{ fontSize: '0.75rem', color: 'var(--sub)' }}>Site / host name</label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--sub)' }}>Display name</label>
           <input className="pw-input" value={draft.hostName} onChange={e => setDraft({ ...draft, hostName: e.target.value })} />
         </div>
+        <button className="pw-btn-grad" onClick={handleSave} disabled={busy} style={{ alignSelf: 'flex-start' }}>{busy ? 'Saving…' : 'Save'}</button>
+      </div>
+
+      <div className="pw-card" style={{ padding: '1.25rem' }}>
+        <p style={{ fontWeight: 700, marginBottom: 10 }}>Cover photo</p>
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '16/6', borderRadius: 12, overflow: 'hidden', background: draft.coverPhotoUrl ? 'none' : DASH.dark, backgroundImage: draft.coverPhotoUrl ? `url(${draft.coverPhotoUrl})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: 12 }}>
+          <button type="button" className="pw-btn-outline" style={{ background: 'rgba(255,255,255,0.92)' }} onClick={() => coverFileRef.current && coverFileRef.current.click()} disabled={uploading}>
+            {uploading ? 'Uploading…' : 'Change photo'}
+          </button>
+          <input ref={coverFileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleCoverPhoto} />
+        </div>
+      </div>
+
+      <div className="pw-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <p style={{ fontWeight: 700 }}>Storefront copy</p>
         <div>
           <label style={{ fontSize: '0.75rem', color: 'var(--sub)' }}>Banner title</label>
           <input className="pw-input" value={draft.bannerTitle} onChange={e => setDraft({ ...draft, bannerTitle: e.target.value })} />
@@ -1053,16 +1562,59 @@ function SettingsSection({ site, onSaved }) {
           <label style={{ fontSize: '0.75rem', color: 'var(--sub)' }}>WhatsApp number (with country code)</label>
           <input className="pw-input" value={draft.whatsappNumber} onChange={e => setDraft({ ...draft, whatsappNumber: e.target.value })} placeholder="+919999999999" />
         </div>
-        <button className="pw-btn-grad" onClick={handleSave} disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button>
+        <button className="pw-btn-outline" onClick={handleSave} disabled={busy} style={{ alignSelf: 'flex-start' }}>{busy ? 'Saving…' : 'Save'}</button>
       </div>
-      <CalendarSyncCard site={draft} onSaved={setDraft} />
-      <PayoutDetailsSection site={draft} onSaved={setDraft} />
     </div>
   );
 }
 
+function Sidebar({ tab, setTab, site, onSignOut }) {
+  const menu = [
+    { key: 'overview', label: 'Overview', icon: '⌂' },
+    { key: 'listings', label: 'Listings', icon: '🏠' },
+    { key: 'bookings', label: 'Bookings', icon: '📩' },
+    { key: 'calendar', label: 'Calendar', icon: '📅' },
+    { key: 'guests', label: 'Guests', icon: '👤' },
+    { key: 'messages', label: 'Messages', icon: '💬' },
+    { key: 'reports', label: 'Reports', icon: '📊' },
+    { key: 'wallet', label: 'Wallet', icon: '💰' },
+    { key: 'payout', label: 'Payout Details', icon: '🏦' },
+  ];
+  const initial = (site.hostName || 'H').charAt(0).toUpperCase();
+  return (
+    <div className="pw-sidebar">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 0.6rem 0.5rem' }}>
+        <div style={{ width: 40, height: 40, borderRadius: '50%', background: DASH.grad, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, flexShrink: 0 }}>{initial}</div>
+        <p style={{ fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{site.hostName}</p>
+      </div>
+      <p className="pw-side-label">MENU</p>
+      {menu.map(m => (
+        <button key={m.key} className={'pw-side-link' + (tab === m.key ? ' active' : '')} onClick={() => setTab(m.key)}>
+          <span className="pw-side-icon">{m.icon}</span>{m.label}
+        </button>
+      ))}
+      <p className="pw-side-label">ACCOUNT</p>
+      <button className={'pw-side-link' + (tab === 'settings' ? ' active' : '')} onClick={() => setTab('settings')}>
+        <span className="pw-side-icon">⚙</span>Settings
+      </button>
+      <a className="pw-side-link" href="/" target="_blank" rel="noreferrer">
+        <span className="pw-side-icon">↗</span>View as guest
+      </a>
+      <button className="pw-side-link" style={{ color: '#F87171' }} onClick={onSignOut}>
+        <span className="pw-side-icon">⎋</span>Log out
+      </button>
+    </div>
+  );
+}
+
+const TAB_TITLES = {
+  overview: 'Overview', listings: 'Listings', bookings: 'Bookings', calendar: 'Calendar',
+  guests: 'Guests', messages: 'Messages', reports: 'Reports', wallet: 'Wallet',
+  payout: 'Payout Details', settings: 'Settings',
+};
+
 function VendorDashboard({ site, onSignOut }) {
-  const [tab, setTab] = useState('bookings');
+  const [tab, setTab] = useState('overview');
   const [bookings, setBookings] = useState([]);
   const [listings, setListings] = useState([]);
   const [siteState, setSiteState] = useState(site);
@@ -1074,42 +1626,27 @@ function VendorDashboard({ site, onSignOut }) {
   }
   useEffect(() => { refresh(); }, []);
 
-  const tabs = [
-    { key: 'bookings', label: 'Bookings' },
-    { key: 'listings', label: 'Listings' },
-    { key: 'wallet', label: 'Wallet' },
-    { key: 'messages', label: 'Messages' },
-    { key: 'guests', label: 'Guests' },
-    { key: 'reports', label: 'Reports' },
-    { key: 'settings', label: 'Settings' },
-  ];
-
   return (
     <div className="pw-root">
       <style>{STYLES}</style>
-      <div style={{ borderBottom: '1px solid var(--border)', padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p style={{ fontWeight: 800 }}>{siteState.hostName} · Dashboard</p>
-        <button className="pw-btn-outline" style={{ padding: '0.4rem 0.9rem', fontSize: '0.85rem' }} onClick={onSignOut}>Sign out</button>
-      </div>
-      <div style={{ display: 'flex', gap: 4, padding: '0.5rem 1.5rem 0', flexWrap: 'wrap', borderBottom: '1px solid var(--border)' }}>
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={'pw-tab' + (tab === t.key ? ' active' : '')}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ padding: '1.5rem', maxWidth: 900 }}>
-        {!loaded ? <p style={{ color: 'var(--sub)' }}>Loading…</p> : (
-          <>
-            {tab === 'bookings' && <BookingsSection bookings={bookings} listings={listings} onRefresh={refresh} />}
-            {tab === 'listings' && <ListingsSection listings={listings} onRefresh={refresh} />}
-            {tab === 'wallet' && <WalletSection bookings={bookings} />}
-            {tab === 'messages' && <HostMessagesSection listings={listings} />}
-            {tab === 'guests' && <GuestsSection bookings={bookings} />}
-            {tab === 'reports' && <ReportsSection bookings={bookings} listings={listings} />}
-            {tab === 'settings' && <SettingsSection site={siteState} onSaved={setSiteState} />}
-          </>
-        )}
+      <div className="pw-dash-shell">
+        <Sidebar tab={tab} setTab={setTab} site={siteState} onSignOut={onSignOut} />
+        <div className="pw-dash-main">
+          {!loaded ? <p style={{ color: 'var(--sub)' }}>Loading…</p> : (
+            <>
+              {tab === 'overview' && <OverviewSection bookings={bookings} listings={listings} site={siteState} />}
+              {tab === 'listings' && <ListingsSection listings={listings} onRefresh={refresh} />}
+              {tab === 'bookings' && <BookingsSection bookings={bookings} listings={listings} onRefresh={refresh} />}
+              {tab === 'calendar' && <CalendarSection listings={listings} onRefresh={refresh} />}
+              {tab === 'guests' && <GuestsSection bookings={bookings} />}
+              {tab === 'messages' && <HostMessagesSection listings={listings} />}
+              {tab === 'reports' && <ReportsSection bookings={bookings} listings={listings} />}
+              {tab === 'wallet' && <WalletSection bookings={bookings} site={siteState} onSaved={setSiteState} />}
+              {tab === 'payout' && <PayoutDetailsSection site={siteState} onSaved={setSiteState} />}
+              {tab === 'settings' && <SettingsSection site={siteState} onSaved={setSiteState} />}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
