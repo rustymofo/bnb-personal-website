@@ -3,6 +3,7 @@ rules_version = '2';
 // deploy step runs end-to-end now that firebase.json/.firebaserc and the
 // FIREBASE_SERVICE_ACCOUNT/FIREBASE_PROJECT_ID secrets are configured.
 // Retry marker: re-triggering after fixing FIREBASE_PROJECT_ID secret value.
+// Retry marker 2: re-triggering after adding Service Usage Consumer IAM role.
 
 // Single-tenant rules: this project serves exactly one host, so "signed in
 // at all" is equivalent to "is the host" (there is only ever one account).
