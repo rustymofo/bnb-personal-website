@@ -29,7 +29,14 @@ service cloud.firestore {
       // publicly readable.
       allow create: if request.resource.data.keys().hasAll(['listingId', 'checkIn', 'checkOut', 'name', 'email', 'phone', 'status'])
                     && request.resource.data.status == 'pending';
-      allow read, update, delete: if request.auth != null;
+      // A guest who has a specific booking's document id (shown to them as a
+      // "confirmation code" after submitting a request) can fetch that one
+      // booking to power the public "My trips" lookup - this is a bearer
+      // capability, the same tradeoff as an airline confirmation code, and
+      // does NOT allow listing/enumerating all bookings, which stays
+      // host-only below.
+      allow get: if true;
+      allow list, update, delete: if request.auth != null;
     }
   }
 }
