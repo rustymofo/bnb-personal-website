@@ -1,0 +1,124 @@
+name: Deploy
+
+# Deploys to production whenever main is updated. Split into two independent
+# jobs so a Firebase rules issue never blocks the site deploy (and vice
+# versa).
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   VERCEL_TOKEN        Personal/team token from https://vercel.com/account/tokens
+#   VERCEL_ORG_ID        `vercel link` locally once and read .vercel/project.json
+#   VERCEL_PROJECT_ID    (same source as above)
+#   FIREBASE_SERVICE_ACCOUNT   Base64-encoded JSON key for a Firebase service
+#                              account with "Firebase Rules Admin" role, i.e.:
+#                              base64 -i service-account.json | tr -d '\n'
+#   FIREBASE_PROJECT_ID  e.g. bnb-personal-website
+#
+# If the Firebase secrets aren't set yet, the rules job is skipped
+# automatically rather than failing the whole run.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-site:
+    name: Deploy site to Vercel
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel environment info
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build project artifacts
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy to Vercel production
+        id: deploy
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Summary
+        run: echo "Deployed to ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-firebase-rules:
+    name: Deploy Firestore/Storage rules
+    runs-on: ubuntu-latest
+    environment: production
+    # Only bother running when the rules files actually changed, and only if
+    # the required secrets have been configured.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check whether rules changed
+        id: changed
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -qE '^(firestore\.rules|storage\.rules|firestore\.indexes\.json)$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check secrets are configured
+        id: secrets
+        run: |
+          if [ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ] && [ -n "${{ secrets.FIREBASE_PROJECT_ID }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        if: steps.changed.outputs.changed == 'true' && steps.secrets.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Decode service account
+        if: steps.changed.outputs.changed == 'true' && steps.secrets.outputs.present == 'true'
+        run: echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" | base64 -d > "$RUNNER_TEMP/firebase-service-account.json"
+
+      - name: Deploy Firestore + Storage rules
+        if: steps.changed.outputs.changed == 'true' && steps.secrets.outputs.present == 'true'
+        run: npx firebase-tools@latest deploy --only firestore:rules,storage --project "${{ secrets.FIREBASE_PROJECT_ID }}" --non-interactive
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+
+      - name: Skip notice
+        if: steps.changed.outputs.changed != 'true' || steps.secrets.outputs.present != 'true'
+        run: echo "Skipping Firebase rules deploy (no rules change or secrets not configured yet)." >> "$GITHUB_STEP_SUMMARY"

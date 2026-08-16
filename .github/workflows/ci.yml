@@ -1,26 +1,43 @@
 name: CI
 
+# Runs on every push and pull request so broken code is caught before it
+# reaches main / gets deployed.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-and-build:
+    name: Test & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run tests
-        run: npm run test
+        run: npm test
 
-      - name: Verify production build
+      - name: Build
         run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
